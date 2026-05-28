@@ -28,7 +28,7 @@ const validateAccount = (req, res, next) => {
 app.post('/api/generate', validateAccount, async (req, res) => {
     const { prompt } = req.body;
     try {
-        const model = gemini.getGenerativeModel({ model: "gemini-2.5-flash" });
+        const model = gemini.getGenerativeModel({ model: "gemini-3.1-flash-lite" });
         const response = await model.generateContent(`${systemPrompt}\n\nUser: ${prompt}`);
         let aiResponse = response.response.text().replace(/```json/g, '').replace(/```/g, '').trim();
         
