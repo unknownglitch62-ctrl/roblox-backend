@@ -1,54 +1,60 @@
+const { GoogleGenerativeAI } = require("@google-generative-ai");
 const express = require('express');
-const cors = require('cors');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
-
 const app = express();
-app.use(cors());
 app.use(express.json());
 
-const gemini = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
+
+// This is your Central System Prompt
+const SYSTEM_PROMPT = `
+You are an expert Roblox Luau architect. 
+1. Output ONLY valid JSON.
+2. The JSON structure must be: { "scripts": [ { "scriptName": "Name", "scriptType": "Script", "parentPath": "Workspace", "code": "..." } ] }.
+3. EVERY script's 'code' field MUST end with the comment: -- END_OF_SCRIPT
+4. Ensure the JSON is properly escaped so it can be parsed by JSON.parse().
+`;
+
 let latestGeneration = null;
 
-const systemPrompt = `You are a Roblox Luau Architect. Output ONLY a single JSON object. No markdown, no explanations.
-{
-    "scriptName": "PascalCaseName",
-    "scriptType": "Script" | "LocalScript" | "ModuleScript",
-    "parentPath": "ServerScriptService" | "StarterGui" | "StarterPlayerScripts" | "ReplicatedStorage" | "Workspace",
-    "code": "Complete Luau code here"
-}`;
-
-const validateAccount = (req, res, next) => {
-    const userToken = req.headers['authorization'];
-    if (!userToken || userToken !== process.env.APP_AUTH_TOKEN) {
-        return res.status(401).json({ success: false, error: "Access Denied." });
-    }
-    next();
-};
-
-app.post('/api/generate', validateAccount, async (req, res) => {
-    const { prompt } = req.body;
+app.post('/api/generate', async (req, res) => {
+    const userPrompt = req.body.prompt;
+    
     try {
-        const model = gemini.getGenerativeModel({ model: "gemini-3.1-flash-lite" });
-        const response = await model.generateContent(`${systemPrompt}\n\nUser: ${prompt}`);
-        let aiResponse = response.response.text().replace(/```json/g, '').replace(/```/g, '').trim();
+        const result = await model.generateContent([
+            SYSTEM_PROMPT,
+            `Task: ${userPrompt}`
+        ]);
         
-        const parsedData = JSON.parse(aiResponse);
-        latestGeneration = {
-            id: Date.now(),
-            scriptName: parsedData.scriptName,
-            scriptType: parsedData.scriptType,
-            parentPath: parsedData.parentPath,
-            code: parsedData.code
-        };
-        res.json({ success: true, message: "Asset ready for Roblox!" });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ success: false, error: "AI Generation failed." });
+        const responseText = result.response.text();
+        
+        // Clean AI response to ensure it is valid JSON
+        const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+            latestGeneration = {
+                id: "task_" + Date.now(),
+                ...JSON.parse(jsonMatch[0])
+            };
+            res.json({ success: true });
+        } else {
+            res.status(500).json({ error: "Failed to parse JSON" });
+        }
+    } catch (err) {
+        res.status(500).json({ error: err.message });
     }
 });
 
-app.get('/api/poll', validateAccount, (req, res) => res.json({ generation: latestGeneration }));
-app.post('/api/clear', validateAccount, (req, res) => { latestGeneration = null; res.json({ success: true }); });
+app.get('/api/poll', (req, res) => {
+    if (latestGeneration) {
+        res.json({ generation: latestGeneration });
+    } else {
+        res.status(204).send();
+    }
+});
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.post('/api/clear', (req, res) => {
+    latestGeneration = null;
+    res.json({ success: true });
+});
+
+app.listen(3000, () => console.log("Backend running on port 3000"));
